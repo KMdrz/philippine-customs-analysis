@@ -30,7 +30,6 @@ class CustomsAnalyzer:
         self.excluded_rows = 0
 
         self.selected_data = pd.DataFrame()
-
         self.grouped = pd.DataFrame()
         self.grouped_two = pd.DataFrame()
         self.pivot = pd.DataFrame()
@@ -48,13 +47,15 @@ class CustomsAnalyzer:
 
         header = pd.read_csv(
             self.input_path,
-            nrows=0
+            nrows=0,
+            encoding="latin1",
         )
 
         sample = pd.read_csv(
             self.input_path,
             nrows=5000,
-            low_memory=False
+            low_memory=False,
+            encoding="latin1",
         )
 
         inspection = {
@@ -65,6 +66,7 @@ class CustomsAnalyzer:
         }
 
         print("\n--- DATASET INSPECTION ---")
+
         print(
             f"Columns: {inspection['column_count']}"
         )
@@ -100,11 +102,11 @@ class CustomsAnalyzer:
             ],
             chunksize=self.chunk_size,
             low_memory=False,
+            encoding="latin1",
         ):
-
             chunk["dutiablevaluephp"] = pd.to_numeric(
                 chunk["dutiablevaluephp"],
-                errors="coerce"
+                errors="coerce",
             )
 
             self.raw_rows += len(chunk)
@@ -123,6 +125,7 @@ class CustomsAnalyzer:
                         > minimum_value_php
                     )
                 )
+
             else:
                 mask = (
                     (chunk["tq"] == filter_quarter)
@@ -135,7 +138,9 @@ class CustomsAnalyzer:
             filtered = chunk.loc[mask].copy()
 
             if not filtered.empty:
-                selected_chunks.append(filtered)
+                selected_chunks.append(
+                    filtered
+                )
 
             self.selected_rows += len(filtered)
 
@@ -152,7 +157,7 @@ class CustomsAnalyzer:
 
         selected = pd.concat(
             selected_chunks,
-            ignore_index=True
+            ignore_index=True,
         )
 
         # Derived numerical column.
@@ -168,7 +173,7 @@ class CustomsAnalyzer:
             selected["dutiablevaluephp"]
             >= 10_000_000,
             "High",
-            "Regular"
+            "Regular",
         )
 
         # Missing category values are represented explicitly.
@@ -217,30 +222,30 @@ class CustomsAnalyzer:
         self.grouped = (
             data.groupby(
                 "countryorigin_iso3",
-                dropna=False
+                dropna=False,
             )
             .agg(
                 row_count=(
                     "dutiablevaluephp",
-                    "size"
+                    "size",
                 ),
                 valid_measure_count=(
                     "dutiablevaluephp",
-                    "count"
+                    "count",
                 ),
                 measure_sum=(
                     "dutiablevaluephp",
-                    "sum"
+                    "sum",
                 ),
                 measure_mean=(
                     "dutiablevaluephp",
-                    "mean"
+                    "mean",
                 ),
             )
             .reset_index()
             .sort_values(
                 "measure_sum",
-                ascending=False
+                ascending=False,
             )
         )
 
@@ -248,24 +253,24 @@ class CustomsAnalyzer:
             data.groupby(
                 [
                     "countryorigin_iso3",
-                    "tq"
+                    "tq",
                 ],
-                dropna=False
+                dropna=False,
             )
             .agg(
                 row_count=(
                     "dutiablevaluephp",
-                    "size"
+                    "size",
                 ),
                 measure_sum=(
                     "dutiablevaluephp",
-                    "sum"
+                    "sum",
                 ),
             )
             .reset_index()
             .sort_values(
                 "measure_sum",
-                ascending=False
+                ascending=False,
             )
         )
 
@@ -284,7 +289,7 @@ class CustomsAnalyzer:
             self.grouped
             .sort_values(
                 "measure_sum",
-                ascending=False
+                ascending=False,
             )
             .head(10)
             .copy()
@@ -296,3 +301,167 @@ class CustomsAnalyzer:
             "pivot": self.pivot,
             "top10": self.top10,
         }
+
+    def validate_results(
+        self,
+        expected_raw_rows: int,
+        expected_raw_sum: float,
+        absolute_tolerance: float = 1.00,
+    ) -> pd.DataFrame:
+        """Check raw totals and internal summary consistency."""
+
+        if self.selected_data.empty:
+            raise ValueError(
+                "No selected data available for validation."
+            )
+
+        checks = []
+
+        selected_sum = (
+            self.selected_data[
+                self.measure_column
+            ].sum()
+        )
+
+        # Check the external Customs 2015 row reference.
+        checks.append({
+            "check": "Raw row count",
+            "expected": expected_raw_rows,
+            "actual": self.raw_rows,
+            "tolerance": 0,
+            "pass": (
+                self.raw_rows
+                == expected_raw_rows
+            ),
+        })
+
+        # Check the external Customs 2015 measure reference.
+        checks.append({
+            "check": "Raw dutiable value sum",
+            "expected": expected_raw_sum,
+            "actual": self.raw_sum,
+            "tolerance": absolute_tolerance,
+            "pass": np.isclose(
+                self.raw_sum,
+                expected_raw_sum,
+                atol=absolute_tolerance,
+                rtol=0,
+            ),
+        })
+
+        # Check that filtering accounts for every raw record.
+        checks.append({
+            "check": "Raw rows = selected + excluded",
+            "expected": self.raw_rows,
+            "actual": (
+                self.selected_rows
+                + self.excluded_rows
+            ),
+            "tolerance": 0,
+            "pass": (
+                self.raw_rows
+                == self.selected_rows
+                + self.excluded_rows
+            ),
+        })
+
+        # Check grouped row counts against selected records.
+        grouped_row_total = int(
+            self.grouped[
+                "row_count"
+            ].sum()
+        )
+
+        checks.append({
+            "check": "Grouped rows = selected rows",
+            "expected": self.selected_rows,
+            "actual": grouped_row_total,
+            "tolerance": 0,
+            "pass": (
+                grouped_row_total
+                == self.selected_rows
+            ),
+        })
+
+        # Check grouped sums against the independent selected sum.
+        grouped_sum = self.grouped[
+            "measure_sum"
+        ].sum()
+
+        checks.append({
+            "check": "Grouped sum = selected sum",
+            "expected": selected_sum,
+            "actual": grouped_sum,
+            "tolerance": absolute_tolerance,
+            "pass": np.isclose(
+                grouped_sum,
+                selected_sum,
+                atol=absolute_tolerance,
+                rtol=0,
+            ),
+        })
+
+        # Exclude pivot margins before checking the pivot sum.
+        pivot_without_margin = self.pivot[
+            self.pivot[
+                "countryorigin_iso3"
+            ] != "Total"
+        ]
+
+        pivot_columns = [
+            column
+            for column in pivot_without_margin.columns
+            if (
+                column != "countryorigin_iso3"
+                and column != "Total"
+            )
+        ]
+
+        pivot_sum = (
+            pivot_without_margin[
+                pivot_columns
+            ]
+            .sum()
+            .sum()
+        )
+
+        checks.append({
+            "check": "Pivot interior sum = selected sum",
+            "expected": selected_sum,
+            "actual": pivot_sum,
+            "tolerance": absolute_tolerance,
+            "pass": np.isclose(
+                pivot_sum,
+                selected_sum,
+                atol=absolute_tolerance,
+                rtol=0,
+            ),
+        })
+
+        # Confirm the Top 10 table comes from the grouped table.
+        top10_sum = self.top10[
+            "measure_sum"
+        ].sum()
+
+        expected_top10_sum = (
+            self.grouped
+            .head(10)[
+                "measure_sum"
+            ]
+            .sum()
+        )
+
+        checks.append({
+            "check": "Top10 values match grouped table",
+            "expected": expected_top10_sum,
+            "actual": top10_sum,
+            "tolerance": absolute_tolerance,
+            "pass": np.isclose(
+                top10_sum,
+                expected_top10_sum,
+                atol=absolute_tolerance,
+                rtol=0,
+            ),
+        })
+
+        return pd.DataFrame(checks)

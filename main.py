@@ -19,7 +19,6 @@ def check_required_columns(
     required_columns: set[str],
 ) -> None:
     """Verify that all required columns exist."""
-
     if not input_path.exists():
         raise FileNotFoundError(
             f"Dataset not found: {input_path}"
@@ -27,14 +26,14 @@ def check_required_columns(
 
     header = pd.read_csv(
         input_path,
-        nrows=0
+        nrows=0,
+        encoding="latin1",
     )
 
     actual_columns = set(header.columns)
 
     missing_columns = (
-        required_columns
-        - actual_columns
+        required_columns - actual_columns
     )
 
     if missing_columns:
@@ -49,7 +48,6 @@ def compare_numpy_methods(
     repetitions: int = 5,
 ) -> pd.DataFrame:
     """Compare loop and vectorized NumPy calculations."""
-
     loop_times = []
     vectorized_times = []
 
@@ -57,7 +55,6 @@ def compare_numpy_methods(
     vectorized_result = None
 
     for _ in range(repetitions):
-
         start = time.perf_counter()
 
         loop_result = np.array([
@@ -81,13 +78,13 @@ def compare_numpy_methods(
 
     equal_results = np.allclose(
         loop_result,
-        vectorized_result
+        vectorized_result,
     )
 
     return pd.DataFrame({
         "method": [
             "Loop",
-            "Vectorized"
+            "Vectorized",
         ],
         "median_time_seconds": [
             np.median(loop_times),
@@ -122,13 +119,13 @@ def create_numpy_demo(
 
     actual_sample_size = min(
         sample_size,
-        len(values)
+        len(values),
     )
 
     sample_indices = rng.choice(
         len(values),
         size=actual_sample_size,
-        replace=False
+        replace=False,
     )
 
     sample = values[sample_indices]
@@ -174,7 +171,7 @@ def create_numpy_demo(
 
     timing.to_csv(
         output_folder / "numpy_timing.csv",
-        index=False
+        index=False,
     )
 
     print("\nLoop vs vectorized:")
@@ -188,21 +185,38 @@ def create_numpy_demo(
     return timing
 
 
+def write_audit_log(
+    audit_log: list[dict],
+    output_folder: Path,
+) -> None:
+    """Write the recorded processing operations to CSV."""
+
+    audit_df = pd.DataFrame(
+        audit_log
+    )
+
+    audit_df.to_csv(
+        output_folder / "audit_log.csv",
+        index=False,
+    )
+
+
 def main() -> int:
     """Run the complete Customs analysis."""
 
     print("=" * 60)
+
     print(
         "PHILIPPINE CUSTOMS 2015 "
         "DATA SUMMARY PROGRAM"
     )
+
     print("=" * 60)
 
     input_path = CONFIG["input_path"]
     output_folder = CONFIG["output_folder"]
 
     try:
-
         # 1. Verify the input structure.
         print(
             "\n[1/7] Checking required columns..."
@@ -210,7 +224,7 @@ def main() -> int:
 
         check_required_columns(
             input_path,
-            REQUIRED_COLUMNS
+            REQUIRED_COLUMNS,
         )
 
         print(
@@ -283,12 +297,12 @@ def main() -> int:
 
         output_folder.mkdir(
             parents=True,
-            exist_ok=True
+            exist_ok=True,
         )
 
         save_summary_tables(
             summaries,
-            output_folder
+            output_folder,
         )
 
         # 6. Create required plots.
@@ -298,12 +312,12 @@ def main() -> int:
 
         create_bar_chart(
             analyzer.top10,
-            output_folder
+            output_folder,
         )
 
         create_heatmap(
             analyzer.pivot,
-            output_folder
+            output_folder,
         )
 
         # 7. Run NumPy demonstration.
@@ -321,13 +335,67 @@ def main() -> int:
         )
 
         print(
+            "\n[7/7] Validating results..."
+        )
+
+        validation = (
+            analyzer.validate_results(
+                expected_raw_rows=CONFIG[
+                    "expected_raw_rows"
+                ],
+                expected_raw_sum=CONFIG[
+                    "expected_raw_sum"
+                ],
+                absolute_tolerance=CONFIG[
+                    "absolute_tolerance"
+                ],
+            )
+        )
+
+        validation.to_csv(
+            output_folder / "validation.csv",
+            index=False,
+        )
+
+        write_audit_log(
+            analyzer.audit_log,
+            output_folder,
+        )
+
+        print(
+            validation.to_string(
+                index=False
+            )
+        )
+
+        failed_checks = validation[
+            ~validation["pass"]
+        ]
+
+        if not failed_checks.empty:
+            print(
+                "\nVALIDATION FAILED."
+            )
+
+            print(
+                failed_checks.to_string(
+                    index=False
+                )
+            )
+
+            return 1
+
+        print(
+            "\nALL VALIDATION CHECKS PASSED."
+        )
+
+        print(
             "\nMain analysis completed."
         )
 
         return 0
 
     except FileNotFoundError as error:
-
         print(
             f"\nERROR: {error}"
         )
@@ -335,7 +403,6 @@ def main() -> int:
         return 1
 
     except ValueError as error:
-
         print(
             f"\nERROR: {error}"
         )
@@ -343,7 +410,6 @@ def main() -> int:
         return 1
 
     except Exception as error:
-
         print(
             "\nUNEXPECTED ERROR: "
             f"{type(error).__name__}: {error}"
