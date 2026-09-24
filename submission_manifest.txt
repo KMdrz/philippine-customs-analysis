@@ -1,0 +1,5 @@
+Repository: https://github.com/KMdrz/philippine-customs-analysis
+
+Release tag: week6-v1.0
+
+Final commit: 8e6606849696de2262f57299c528e4f2dd3ebfff
